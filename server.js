@@ -13,8 +13,13 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
-// Serve UI
-app.use('/', express.static(path.join(__dirname)));
+// Serve ui.html at the root
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'ui.html'));
+});
+
+// Serve static files if you add CSS/JS/images later
+app.use(express.static(path.join(__dirname)));
 
 // Environment config
 const PORT = process.env.PORT || 3000;
@@ -121,3 +126,4 @@ io.on('connection', socket=>{
 });
 
 server.listen(PORT, ()=>console.log(`Server running on port ${PORT}`));
+

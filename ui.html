@@ -6,147 +6,110 @@
 <title>Proxy Control Panel</title>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <style>
-  body { font-family: Arial, sans-serif; background: #1e1e1e; color: #f0f0f0; margin: 0; padding: 20px;}
-  h1 { text-align: center; }
-  #login, #panel { max-width: 600px; margin: 0 auto; background: #2b2b2b; padding: 20px; border-radius: 8px; }
-  input, button, select { display: block; width: 100%; padding: 10px; margin: 10px 0; border-radius: 4px; border: none; }
-  button { background: #4caf50; color: white; cursor: pointer; }
-  button:hover { background: #45a049; }
-  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-  th, td { border: 1px solid #444; padding: 8px; text-align: left; }
-  th { background: #333; }
+  body { background: #1e1e1e; color: #f0f0f0; font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+  input, button { margin: 5px; padding: 10px; border-radius: 5px; border: none; }
+  input { width: 200px; }
+  button { background: #007acc; color: white; cursor: pointer; }
+  button:hover { background: #005f99; }
+  #status { margin-top: 10px; }
 </style>
 </head>
 <body>
-
 <h1>Proxy Control Panel</h1>
 
-<div id="login">
-  <h2>Login</h2>
-  <input type="text" id="username" placeholder="Username" />
-  <input type="password" id="password" placeholder="Password" />
-  <button onclick="login()">Login</button>
-  <p id="login-status"></p>
+<div id="loginDiv">
+  <input type="text" id="username" placeholder="Username">
+  <input type="password" id="password" placeholder="Password">
+  <button id="loginBtn">Login</button>
 </div>
 
-<div id="panel" style="display:none;">
-  <h2>Welcome, <span id="user-name"></span> (<span id="user-role"></span>)</h2>
-
-  <h3>Online Users</h3>
-  <table>
-    <thead>
-      <tr><th>Username</th><th>Role</th><th>Version</th><th>Actions</th></tr>
-    </thead>
-    <tbody id="online-users"></tbody>
-  </table>
-
-  <div id="owner-controls" style="display:none;">
-    <h3>Owner Controls</h3>
-    <input type="text" id="new-username" placeholder="New Username" />
-    <input type="password" id="new-password" placeholder="New Password" />
-    <select id="new-role">
-      <option value="member">Member</option>
-      <option value="moderator">Moderator</option>
-    </select>
-    <button onclick="createUser()">Create User</button>
-
-    <button onclick="toggleKillSwitch(true)">Enable Kill Switch</button>
-    <button onclick="toggleKillSwitch(false)">Disable Kill Switch</button>
+<div id="panelDiv" style="display:none;">
+  <h2>Welcome, <span id="userRole"></span></h2>
+  <div id="commands">
+    <!-- Example commands -->
+    <button id="killSwitchBtn">Toggle Kill Switch</button>
   </div>
+  <div id="status"></div>
+  <h3>Online Users:</h3>
+  <ul id="onlineList"></ul>
 </div>
 
 <script>
-let socket;
-let jwtToken;
-let currentUserRole;
+let token = null;
+let socket = null;
 
+// LOGIN FUNCTION
 async function login() {
   const username = document.getElementById('username').value;
   const password = document.getElementById('password').value;
-  const res = await fetch('/api/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password })
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if(data.token){
+      token = data.token;
+      document.getElementById('loginDiv').style.display = 'none';
+      document.getElementById('panelDiv').style.display = 'block';
+      document.getElementById('userRole').textContent = `${username} (${data.role})`;
+      initSocket();
+      updateOnlineUsers();
+    } else {
+      alert('Login failed: ' + (data.error||'Unknown error'));
+    }
+  } catch(e){ alert('Login error: ' + e); }
+}
+
+// SOCKET.IO INITIALIZATION
+function initSocket(){
+  socket = io({ auth: { token, version: '1.0' } });
+  socket.on('connect', ()=>console.log('Connected to server via Socket.IO'));
+  socket.on('server:kill-switch', data=>{
+    const status = document.getElementById('status');
+    status.textContent = data.enabled ? 'Kill switch ACTIVE' : 'Kill switch OFF';
   });
-  const data = await res.json();
-  if(data.token) {
-    jwtToken = data.token;
-    currentUserRole = data.role;
-    document.getElementById('login').style.display = 'none';
-    document.getElementById('panel').style.display = 'block';
-    document.getElementById('user-name').innerText = username;
-    document.getElementById('user-role').innerText = data.role;
-    if(currentUserRole === 'owner') document.getElementById('owner-controls').style.display = 'block';
-    connectSocket();
-    updateOnlineUsers();
-  } else {
-    document.getElementById('login-status').innerText = data.error || 'Login failed';
-  }
-}
-
-function connectSocket() {
-  socket = io({ auth: { token: jwtToken, version: '1.0' } });
-  socket.on('connect', ()=>console.log('Socket connected'));
-  socket.on('server:online-update', data => renderOnlineUsers(data));
-  socket.on('server:kill-switch', data => alert('Kill switch ' + (data.enabled?'enabled':'disabled')));
-  socket.on('server:command', data => console.log('Command received:', data));
-}
-
-async function updateOnlineUsers() {
-  const res = await fetch('/api/online', {
-    headers: { 'Authorization': 'Bearer ' + jwtToken }
-  });
-  const users = await res.json();
-  renderOnlineUsers(users);
-  setTimeout(updateOnlineUsers, 2000);
-}
-
-function renderOnlineUsers(users) {
-  const tbody = document.getElementById('online-users');
-  tbody.innerHTML = '';
-  users.forEach(u=>{
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${u.username}</td>
-      <td>${u.role}</td>
-      <td>${u.version}</td>
-      <td>
-        ${currentUserRole==='owner'||currentUserRole==='moderator' ? `
-          <button onclick='sendCommand("${u.socketId}","timeout")'>Timeout</button>
-          <button onclick='sendCommand("${u.socketId}","kick")'>Kick</button>
-        `:''}
-      </td>
-    `;
-    tbody.appendChild(tr);
+  socket.on('server:online-update', data=>{
+    const list = document.getElementById('onlineList');
+    list.innerHTML = '';
+    data.forEach(user=>{
+      const li = document.createElement('li');
+      li.textContent = `${user.username} (${user.role}) - ${user.version}`;
+      list.appendChild(li);
+    });
   });
 }
 
-async function createUser() {
-  const username = document.getElementById('new-username').value;
-  const password = document.getElementById('new-password').value;
-  const role = document.getElementById('new-role').value;
-  const res = await fetch('/api/users', {
-    method:'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer '+jwtToken },
-    body: JSON.stringify({ username, password, role })
-  });
-  const data = await res.json();
-  if(data.ok) alert('User created');
-  else alert(data.error);
+// UPDATE ONLINE USERS MANUALLY
+async function updateOnlineUsers(){
+  try {
+    const res = await fetch('/api/online', { headers: { 'Authorization': 'Bearer '+token } });
+    const users = await res.json();
+    const list = document.getElementById('onlineList');
+    list.innerHTML = '';
+    users.forEach(user=>{
+      const li = document.createElement('li');
+      li.textContent = `${user.username} (${user.role}) - ${user.version}`;
+      list.appendChild(li);
+    });
+  } catch(e){ console.error(e); }
 }
 
-function sendCommand(socketId, command) {
-  socket.emit('server:command', { targetSocketId: socketId, command, data:{} });
-}
-
-function toggleKillSwitch(enable) {
-  fetch('/api/kill-switch', {
-    method:'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer '+jwtToken },
-    body: JSON.stringify({ enable })
-  }).then(r=>r.json()).then(d=>alert('Kill switch ' + (d.killSwitchEnabled?'enabled':'disabled')));
-}
+// BUTTON EVENTS
+document.getElementById('loginBtn').addEventListener('click', login);
+document.getElementById('killSwitchBtn').addEventListener('click', async ()=>{
+  try{
+    const res = await fetch('/api/kill-switch', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
+      body: JSON.stringify({ enable: true })
+    });
+    const data = await res.json();
+    alert(data.killSwitchEnabled ? 'Kill switch activated' : 'Kill switch deactivated');
+  } catch(e){ console.error(e); alert('Error toggling kill switch'); }
+});
 </script>
-
 </body>
 </html>
+

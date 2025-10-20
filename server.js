@@ -3,7 +3,6 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const socketio = require('socket.io');
-const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -38,13 +37,20 @@ app.use(express.static(path.join(__dirname)));
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_for_local';
 
-// In-memory users (demo only)
-let users = {};
-async function createInitialUsers(){
-  users['memegodmidas'] = { passwordHash: await bcrypt.hash('username', 10), role: 'owner', banned: false };
-  users['Godsatan1342'] = { passwordHash: await bcrypt.hash('password', 10), role: 'owner', banned: false };
+// === HARD-CODED USERS ===
+const users = {
+  "memegodmidas": { password: "username", role: "owner", banned: false },
+  "Godsatan1342": { password: "password", role: "owner", banned: false },
+  "member1": { password: "memberpass", role: "member", banned: false },
+  "mod1": { password: "modpass", role: "moderator", banned: false }
+};
+
+// Helper function to verify login
+async function verifyUser(username, password){
+  const user = users[username];
+  if(!user) return false;
+  return user.password === password;
 }
-createInitialUsers();
 
 // Track connected clients
 const online = new Map();
@@ -62,15 +68,14 @@ function authMiddleware(req, res, next){
   } catch { return res.status(401).json({ error: 'Invalid token' }); }
 }
 
-// LOGIN
+// LOGIN ROUTE
 app.post('/api/login', async (req,res)=>{
   const { username, password } = req.body;
-  const u = users[username];
-  if(!u) return res.status(401).json({ error: 'Invalid credentials' });
-  const match = await bcrypt.compare(password, u.passwordHash);
-  if(!match) return res.status(401).json({ error: 'Invalid credentials' });
-  const token = jwt.sign({ username, role: u.role }, JWT_SECRET, { expiresIn: '6h' });
-  res.json({ token, role: u.role });
+  const valid = await verifyUser(username, password);
+  if(!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+  const token = jwt.sign({ username, role: users[username].role }, JWT_SECRET, { expiresIn: '6h' });
+  res.json({ token, role: users[username].role });
 });
 
 // Create new user (Owner only)
@@ -78,7 +83,7 @@ app.post('/api/users', authMiddleware, async (req,res)=>{
   if(req.user.role !== 'owner') return res.status(403).json({ error: 'Need owner' });
   const { username, password, role } = req.body;
   if(users[username]) return res.status(400).json({ error: 'Exists' });
-  users[username] = { passwordHash: await bcrypt.hash(password,10), role: role||'member', banned:false };
+  users[username] = { password, role: role||'member', banned:false };
   res.json({ ok:true });
 });
 
@@ -139,3 +144,4 @@ io.on('connection', socket=>{
 });
 
 server.listen(PORT, ()=>console.log(`Server running on port ${PORT}`));
+

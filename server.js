@@ -9,11 +9,24 @@ const helmet = require('helmet');
 const cors = require('cors');
 
 const app = express();
-app.use(helmet());
+
+// Helmet with custom CSP to allow Socket.IO CDN and inline scripts
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        "script-src": ["'self'", "https://cdn.socket.io"],
+        "script-src-attr": ["'unsafe-inline'"]
+      }
+    }
+  })
+);
+
 app.use(cors());
 app.use(express.json());
 
-// Serve ui.html at the root
+// Serve ui.html at root
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'ui.html'));
 });
@@ -126,4 +139,3 @@ io.on('connection', socket=>{
 });
 
 server.listen(PORT, ()=>console.log(`Server running on port ${PORT}`));
-

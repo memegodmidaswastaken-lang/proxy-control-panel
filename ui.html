@@ -22,8 +22,23 @@
     <button id="killSwitchBtn">Toggle Kill Switch</button>
   </div>
   <div id="status"></div>
+
   <h3>Online Users:</h3>
   <ul id="onlineList"></ul>
+
+  <!-- Owner-only new user form -->
+  <div id="newUserDiv" style="display:none;">
+    <h3>Create New User (Owner only)</h3>
+    <input type="text" id="newUsername" placeholder="New Username">
+    <input type="password" id="newPassword" placeholder="New Password">
+    <select id="newRole">
+      <option value="member">Member</option>
+      <option value="moderator">Moderator</option>
+      <option value="owner">Owner</option>
+    </select>
+    <button id="createUserBtn">Create User</button>
+    <div id="newUserStatus"></div>
+  </div>
 </div>
 
 <script src="main.js"></script>

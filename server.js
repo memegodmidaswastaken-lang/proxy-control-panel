@@ -36,10 +36,10 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_for_local';
 
 // === HARD-CODED USERS ===
 const users = {
-  "memegodmidas": { password: "username", role: "owner", banned: false },
-  "Godsatan1342": { password: "password", role: "owner", banned: false },
-  "member1": { password: "memberpass", role: "member", banned: false },
-  "mod1": { password: "modpass", role: "moderator", banned: false }
+  "memegodmidas": { password: "Godsatan1342", role: "owner", banned: false },
+  "MEMEADMIN": { password: "Satangod1342", role: "owner", banned: false },
+  "mememember": { password: "lololowewe23232", role: "member", banned: false },
+  "mod1": { password: "modkiller14535", role: "moderator", banned: false }
 };
 
 // Track connected clients: socketId -> { username, role, version, lastSeen }

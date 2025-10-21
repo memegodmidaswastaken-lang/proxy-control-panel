@@ -1,0 +1,5 @@
+{
+  "memegodmidas": { "password": "Godsatan1342", "role": "owner" },
+  "testmember": { "password": "memberpass", "role": "member" },
+  "testmod": { "password": "modpass", "role": "moderator" }
+}

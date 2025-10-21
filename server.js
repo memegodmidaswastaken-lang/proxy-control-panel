@@ -29,11 +29,8 @@ app.use(express.json());
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'ui.html'));
 });
-
-// Serve static files if you add CSS/JS/images later
 app.use(express.static(path.join(__dirname)));
 
-// Environment config
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_for_local';
 
@@ -45,15 +42,22 @@ const users = {
   "mod1": { password: "modpass", role: "moderator", banned: false }
 };
 
-// Helper function to verify login
-async function verifyUser(username, password){
-  const user = users[username];
-  if(!user) return false;
-  return user.password === password;
-}
-
-// Track connected clients
+// Track connected clients: socketId -> { username, role, version, lastSeen }
 const online = new Map();
+
+// Track banned until timestamps (ms) for temporary timeouts: username -> timestamp
+const bannedUntil = {}; // e.g. { "member1": 1699999999999 }
+
+// Helper
+function isTemporarilyBanned(username){
+  const until = bannedUntil[username];
+  if(!until) return false;
+  if(Date.now() > until){
+    delete bannedUntil[username];
+    return false;
+  }
+  return true;
+}
 
 // API auth middleware
 function authMiddleware(req, res, next){
@@ -62,20 +66,27 @@ function authMiddleware(req, res, next){
   const token = auth.split(' ')[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    // check banned permanent
     if(users[decoded.username]?.banned) return res.status(403).json({ error: 'Banned' });
+    // check timed ban
+    if(isTemporarilyBanned(decoded.username)) return res.status(403).json({ error: 'Temporarily banned' });
     req.user = decoded;
     next();
-  } catch { return res.status(401).json({ error: 'Invalid token' }); }
+  } catch (e) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
 }
 
-// LOGIN ROUTE
+// LOGIN ROUTE (plaintext passwords from users object)
 app.post('/api/login', async (req,res)=>{
   const { username, password } = req.body;
-  const valid = await verifyUser(username, password);
-  if(!valid) return res.status(401).json({ error: 'Invalid credentials' });
-
-  const token = jwt.sign({ username, role: users[username].role }, JWT_SECRET, { expiresIn: '6h' });
-  res.json({ token, role: users[username].role });
+  const user = users[username];
+  if(!user) return res.status(401).json({ error: 'Invalid credentials' });
+  if(user.password !== password) return res.status(401).json({ error: 'Invalid credentials' });
+  if(user.banned) return res.status(403).json({ error: 'Banned' });
+  if(isTemporarilyBanned(username)) return res.status(403).json({ error: 'Temporarily banned' });
+  const token = jwt.sign({ username, role: user.role }, JWT_SECRET, { expiresIn: '6h' });
+  res.json({ token, role: user.role });
 });
 
 // Create new user (Owner only)
@@ -96,7 +107,7 @@ app.get('/api/online', authMiddleware, (req,res)=>{
   res.json(arr);
 });
 
-// Kill switch
+// Kill switch (owner only)
 let killSwitchEnabled = false;
 app.post('/api/kill-switch', authMiddleware, (req,res)=>{
   if(req.user.role !== 'owner') return res.status(403).json({ error:'Need owner' });
@@ -109,15 +120,26 @@ app.post('/api/kill-switch', authMiddleware, (req,res)=>{
 const server = http.createServer(app);
 const io = socketio(server, { cors: { origin: '*' } });
 
+// Helper: find socket id(s) by username
+function findSocketsByUsername(username){
+  const matches = [];
+  for(const [sid, info] of online.entries()){
+    if(info.username === username) matches.push(sid);
+  }
+  return matches;
+}
+
 io.use((socket,next)=>{
   const token = socket.handshake.auth?.token;
   if(!token) return next(new Error('Auth required'));
   try{
     const decoded = jwt.verify(token, JWT_SECRET);
+    // check banned
     if(users[decoded.username]?.banned) return next(new Error('Banned'));
+    if(isTemporarilyBanned(decoded.username)) return next(new Error('Temporarily banned'));
     socket.user = decoded;
     next();
-  } catch { next(new Error('Invalid token')); }
+  } catch (e) { next(new Error('Invalid token')); }
 });
 
 io.on('connection', socket=>{
@@ -125,16 +147,89 @@ io.on('connection', socket=>{
   online.set(socket.id, { username, role, version: socket.handshake.auth.version||'unknown', lastSeen: new Date().toISOString() });
   io.emit('server:online-update', Array.from(online.entries()).map(([sid, info])=>({ socketId:sid, ...info })));
 
-  socket.on('server:command', payload=>{
+  // Admins will emit 'server:command' to the server socket; we process commands here
+  socket.on('server:command', async payload=>{
     const sender = socket.user;
-    if(!(sender.role==='owner'||sender.role==='moderator')) return socket.emit('error','No permission');
+    if(!(sender.role === 'owner' || sender.role === 'moderator')) return socket.emit('error','No permission');
+
     const { targetSocketId, command, data } = payload;
-    const targetInfo = online.get(targetSocketId);
+
+    // Allow command by username target too (support client passing username)
+    let targetInfo = online.get(targetSocketId);
+    // if not found by socketId, maybe payload provided username in targetSocketId
+    if(!targetInfo && typeof targetSocketId === 'string'){
+      // try find by username
+      for(const [sid, info] of online.entries()){
+        if(info.username === targetSocketId) { targetInfo = info; break; }
+      }
+    }
+
     if(!targetInfo) return socket.emit('error','Target not online');
-    if(sender.role==='moderator' && (targetInfo.role==='owner'||targetInfo.role==='moderator')) return socket.emit('error','Moderator cannot target this user');
-    if(killSwitchEnabled && sender.role!=='owner') return socket.emit('error','Kill switch active');
-    io.to(targetSocketId).emit('server:command',{ from: sender.username, command, data });
-    socket.emit('server:command_sent',{ ok:true });
+
+    // Prevent moderators from targeting owners or other moderators
+    if(sender.role === 'moderator' && (targetInfo.role === 'owner' || targetInfo.role === 'moderator')){
+      return socket.emit('error','Moderator cannot target this user');
+    }
+
+    // Kill switch prevention: if enabled only owner can act
+    if(killSwitchEnabled && sender.role !== 'owner') return socket.emit('error','Kill switch active');
+
+    // Identify username(s) for server-side actions
+    const targetUsername = targetInfo.username;
+    const targetSocketIds = findSocketsByUsername(targetUsername);
+
+    // Handle built-in admin actions on server side
+    if(command === 'kick'){
+      // disconnect all sockets for that username
+      for(const sid of targetSocketIds){
+        const s = io.sockets.sockets.get(sid);
+        if(s) s.disconnect(true);
+        online.delete(sid);
+      }
+      io.emit('server:online-update', Array.from(online.entries()).map(([sid, info])=>({ socketId:sid, ...info })));
+      socket.emit('server:command_sent', { ok:true, info: 'kicked' });
+      return;
+    }
+
+    if(command === 'ban'){
+      // Only owner can ban (extra check)
+      if(sender.role !== 'owner') return socket.emit('error', 'Only owner can ban');
+      // set permanent ban
+      if(users[targetUsername]) users[targetUsername].banned = true;
+      // disconnect
+      for(const sid of targetSocketIds){
+        const s = io.sockets.sockets.get(sid);
+        if(s) s.disconnect(true);
+        online.delete(sid);
+      }
+      io.emit('server:online-update', Array.from(online.entries()).map(([sid, info])=>({ socketId:sid, ...info })));
+      socket.emit('server:command_sent', { ok:true, info: 'banned' });
+      return;
+    }
+
+    if(command === 'timeout'){
+      // data.seconds expected
+      const seconds = (data && data.seconds) ? parseInt(data.seconds,10) : 30;
+      if(isNaN(seconds) || seconds <= 0) return socket.emit('error','Invalid timeout seconds');
+      // mods cannot timeout owners or mods (we already checked above)
+      // set temporary ban
+      bannedUntil[targetUsername] = Date.now() + (seconds * 1000);
+      // disconnect
+      for(const sid of targetSocketIds){
+        const s = io.sockets.sockets.get(sid);
+        if(s) s.disconnect(true);
+        online.delete(sid);
+      }
+      io.emit('server:online-update', Array.from(online.entries()).map(([sid, info])=>({ socketId:sid, ...info })));
+      socket.emit('server:command_sent', { ok:true, info: `timed out ${seconds}s` });
+      return;
+    }
+
+    // For any other commands, forward to target socket(s)
+    for(const sid of targetSocketIds){
+      io.to(sid).emit('server:command', { from: sender.username, command, data });
+    }
+    socket.emit('server:command_sent', { ok:true });
   });
 
   socket.on('disconnect', ()=>{
@@ -144,4 +239,3 @@ io.on('connection', socket=>{
 });
 
 server.listen(PORT, ()=>console.log(`Server running on port ${PORT}`));
-

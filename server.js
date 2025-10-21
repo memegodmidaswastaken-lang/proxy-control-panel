@@ -1,61 +1,58 @@
 // server.js
 const express = require('express');
 const cors = require('cors');
-const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
+// Load users from JSON
 const USERS_FILE = './users.json';
-const JWT_SECRET = 'supersecretkey123';
-const PORT = process.env.PORT || 3000;
-
-// Load users
 let users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
 
-// Online users tracking
-let onlineUsers = {};
+// Online users and sessions
+let onlineUsers = {}; // { username: { lastSeen, role, version } }
+let sessions = {};    // { sessionId: { username, role, lastSeen } }
 
 // Auth middleware
 function authMiddleware(req, res, next) {
-  const auth = req.headers.authorization;
-  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
-  const token = auth.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (e) {
-    return res.status(401).json({ error: 'Invalid token' });
-  }
+  const sessionId = req.headers['x-session-id'];
+  if (!sessionId || !sessions[sessionId]) return res.status(401).json({ error: 'Unauthorized' });
+  req.session = sessions[sessionId];
+  next();
 }
 
-// Serve static files from current directory
-app.use('/static', express.static(__dirname));
-
-// Serve ui.html at root
+// Serve index.html at root
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'ui.html'));
+});
+
+// Serve main.js
+app.get('/static/main.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'main.js'));
 });
 
 // LOGIN
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) return res.json({ error: 'Missing username/password' });
   const user = users[username];
   if (!user || user.password !== password) return res.json({ error: 'Invalid credentials' });
 
-  const token = jwt.sign({ username, role: user.role }, JWT_SECRET, { expiresIn: '12h' });
-  res.json({ token, role: user.role });
+  const sessionId = crypto.randomBytes(16).toString('hex');
+  sessions[sessionId] = { username, role: user.role, lastSeen: new Date() };
+  onlineUsers[username] = { lastSeen: new Date(), role: user.role, version: '1.0' };
+
+  res.json({ sessionId, role: user.role });
 });
 
 // HEARTBEAT
 app.post('/api/heartbeat', authMiddleware, (req, res) => {
-  const { username, role } = req.user;
+  const { username, role } = req.session;
   onlineUsers[username] = { lastSeen: new Date(), role, version: '1.0' };
+  req.session.lastSeen = new Date();
   res.json({ ok: true });
 });
 
@@ -69,28 +66,27 @@ app.get('/api/online', authMiddleware, (req, res) => {
   })));
 });
 
-// CREATE USER (owner-only)
+// CREATE USER (owner only)
 app.post('/api/users', authMiddleware, (req, res) => {
+  if (req.session.role !== 'owner') return res.status(403).json({ error: 'Forbidden' });
   const { username, password, role } = req.body;
-  if (req.user.role !== 'owner') return res.status(403).json({ error: 'Forbidden' });
-  if (!username || !password || !role) return res.json({ error: 'Missing fields' });
   users[username] = { password, role };
   fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
   res.json({ ok: true });
 });
 
-// Kill switch (owner-only)
+// KILL SWITCH (owner only)
 let killSwitchEnabled = false;
 app.post('/api/kill-switch', authMiddleware, (req, res) => {
-  if (req.user.role !== 'owner') return res.status(403).json({ error: 'Forbidden' });
+  if (req.session.role !== 'owner') return res.status(403).json({ error: 'Forbidden' });
   const { enable } = req.body;
   killSwitchEnabled = !!enable;
   res.json({ killSwitchEnabled });
 });
 
-// User config (role-based interval)
+// USER CONFIG (interval)
 app.get('/api/user-config', authMiddleware, (req, res) => {
-  const role = req.user.role;
+  const role = req.session.role;
   let interval = 1;
   switch(role){
     case 'member': interval = 1; break;
@@ -109,4 +105,4 @@ setInterval(() => {
   }
 }, 60 * 1000);
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(3000, () => console.log('Server running on port 3000'));

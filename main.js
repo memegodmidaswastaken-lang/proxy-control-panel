@@ -26,11 +26,9 @@ async function login() {
         document.getElementById('newUserDiv').style.display = 'block';
       }
 
-      // Show download button for owner and moderator
-      if(data.role === 'owner' || data.role === 'moderator') {
-        const downloadBtn = document.getElementById('downloadBtn');
-        downloadBtn.style.display = 'inline-block';
-      }
+      // Initialize buttons based on role
+      setupKillSwitchButton();
+      setupDownloadButton();
 
       initSocket();
       updateOnlineUsers();
@@ -75,13 +73,12 @@ function renderOnlineUsers(users){
       kickBtn.onclick = ()=> sendAdminCommand(user.socketId, 'kick', {});
       actions.appendChild(kickBtn);
 
-      // Ban (only owner permitted server-side; client UI shows but server will check)
+      // Ban (only owner server-side; moderators will be blocked)
       const banBtn = document.createElement('button');
       banBtn.textContent = 'Ban';
       banBtn.style.margin = '0 4px';
       banBtn.onclick = ()=> {
         if(!confirm(`Ban ${user.username}?`)) return;
-        // send target as username to server for safety
         sendAdminCommand(user.username, 'ban', {});
       };
       actions.appendChild(banBtn);
@@ -95,7 +92,6 @@ function renderOnlineUsers(users){
         if(s === null) return;
         const seconds = parseInt(s,10);
         if(isNaN(seconds) || seconds <= 0) { alert('Invalid seconds'); return; }
-        // send by username
         sendAdminCommand(user.username, 'timeout', { seconds });
       };
       actions.appendChild(timeoutBtn);
@@ -109,9 +105,7 @@ function renderOnlineUsers(users){
 
 // send admin command to server
 function sendAdminCommand(targetSocketIdOrUsername, command, data){
-  // we use socket.emit('server:command', ...) which server validates
   socket.emit('server:command', { targetSocketId: targetSocketIdOrUsername, command, data });
-  // optionally we can show quick feedback
   console.log('Sent admin command', command, targetSocketIdOrUsername, data);
 }
 
@@ -121,17 +115,38 @@ async function updateOnlineUsers(){
     const res = await fetch('/api/online', { headers: { 'Authorization': 'Bearer '+token } });
     const users = await res.json();
     renderOnlineUsers(users);
-    // Poll
     setTimeout(updateOnlineUsers, 3000);
   } catch(e){ console.error(e); }
 }
 
-// DOWNLOAD BUTTON logic (kept here but only visible to owner/mod)
-document.getElementById('loginBtn').addEventListener('click', login);
-const downloadBtn = document.getElementById('downloadBtn');
-if(downloadBtn){
-  downloadBtn.addEventListener('click', ()=>{
-    const proxyScript = `# proxyloop.ps1 - Constantly sets Windows proxy until closed
+// Setup Kill Switch button (OWNER ONLY)
+function setupKillSwitchButton(){
+  const killBtn = document.getElementById('killSwitchBtn');
+  if(myRole === 'owner'){
+    killBtn.style.display = 'inline-block';
+    killBtn.addEventListener('click', async ()=>{
+      try{
+        const res = await fetch('/api/kill-switch', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
+          body: JSON.stringify({ enable: true })
+        });
+        const data = await res.json();
+        alert(data.killSwitchEnabled ? 'Kill switch activated' : 'Kill switch deactivated');
+      } catch(e){ console.error(e); alert('Error toggling kill switch'); }
+    });
+  } else {
+    killBtn.style.display = 'none';
+  }
+}
+
+// Setup Download Proxy Script button (OWNER ONLY)
+function setupDownloadButton(){
+  const downloadBtn = document.getElementById('downloadBtn');
+  if(myRole === 'owner'){
+    downloadBtn.style.display = 'inline-block';
+    downloadBtn.addEventListener('click', ()=>{
+      const proxyScript = `# proxyloop.ps1 - Constantly sets Windows proxy until closed
 $proxyServer = "127.0.0.1:8080"
 $interval = 5
 Write-Host "Starting proxy replacement loop..."
@@ -149,17 +164,20 @@ while ($true) {
     Start-Sleep -Seconds $interval
 }
 `;
-    const blob = new Blob([proxyScript], { type: 'text/plain' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'proxyloop.ps1';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  });
+      const blob = new Blob([proxyScript], { type: 'text/plain' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'proxyloop.ps1';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+  } else {
+    downloadBtn.style.display = 'none';
+  }
 }
 
-// create user button
+// CREATE NEW USER BUTTON (OWNER ONLY)
 const createUserBtn = document.getElementById('createUserBtn');
 if(createUserBtn){
   createUserBtn.addEventListener('click', async ()=>{
@@ -194,18 +212,5 @@ if(createUserBtn){
   });
 }
 
-// Kill switch button
-document.getElementById('killSwitchBtn').addEventListener('click', async ()=>{
-  try{
-    const res = await fetch('/api/kill-switch', {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token },
-      body: JSON.stringify({ enable: true })
-    });
-    const data = await res.json();
-    alert(data.killSwitchEnabled ? 'Kill switch activated' : 'Kill switch deactivated');
-  } catch(e){ console.error(e); alert('Error toggling kill switch'); }
-});
-
-
-
+// LOGIN BUTTON
+document.getElementById('loginBtn').addEventListener('click', login);

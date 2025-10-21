@@ -3,21 +3,21 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(express.json());
 app.use(cors());
-app.use(express.static('public')); // serve ui.html, main.js
 
 const USERS_FILE = './users.json';
-const JWT_SECRET = 'supersecretkey123'; // replace with strong secret
+const JWT_SECRET = 'supersecretkey123';
 const PORT = process.env.PORT || 3000;
 
 // Load users
 let users = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
 
 // Online users tracking
-let onlineUsers = {}; // { username: { lastSeen: Date, role, version } }
+let onlineUsers = {};
 
 // Auth middleware
 function authMiddleware(req, res, next) {
@@ -32,6 +32,14 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: 'Invalid token' });
   }
 }
+
+// Serve static files from current directory
+app.use('/static', express.static(__dirname));
+
+// Serve ui.html at root
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'ui.html'));
+});
 
 // LOGIN
 app.post('/api/login', (req, res) => {
@@ -61,7 +69,7 @@ app.get('/api/online', authMiddleware, (req, res) => {
   })));
 });
 
-// Create new user (owner-only)
+// CREATE USER (owner-only)
 app.post('/api/users', authMiddleware, (req, res) => {
   const { username, password, role } = req.body;
   if (req.user.role !== 'owner') return res.status(403).json({ error: 'Forbidden' });
@@ -80,7 +88,7 @@ app.post('/api/kill-switch', authMiddleware, (req, res) => {
   res.json({ killSwitchEnabled });
 });
 
-// Optional: return user-config (role-based proxy interval)
+// User config (role-based interval)
 app.get('/api/user-config', authMiddleware, (req, res) => {
   const role = req.user.role;
   let interval = 1;

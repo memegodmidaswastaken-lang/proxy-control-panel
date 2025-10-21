@@ -3,3 +3,4 @@
   "testmember": { "password": "memberpass", "role": "member" },
   "testmod": { "password": "modpass", "role": "moderator" }
 }
+

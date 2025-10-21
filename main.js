@@ -24,6 +24,40 @@ async function login() {
         document.getElementById('newUserDiv').style.display = 'block';
       }
 
+      // Show download button for owner and moderator
+      if(data.role === 'owner' || data.role === 'moderator') {
+        const downloadBtn = document.getElementById('downloadBtn');
+        downloadBtn.style.display = 'inline-block';
+        downloadBtn.addEventListener('click', ()=>{
+          const proxyScript = `
+# proxyloop.ps1 - Constantly sets Windows proxy until closed
+$proxyServer = "127.0.0.1:8080"
+$interval = 5
+Write-Host "Starting proxy replacement loop..."
+Write-Host "Setting proxy to $proxyServer every $interval seconds."
+Write-Host "Press Ctrl + C to stop."
+while ($true) {
+    try {
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyEnable -Value 1
+        Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" -Name ProxyServer -Value $proxyServer
+        Write-Host "Proxy set to $proxyServer at $(Get-Date -Format 'HH:mm:ss')"
+    }
+    catch {
+        Write-Host "Error setting proxy: $_"
+    }
+    Start-Sleep -Seconds $interval
+}
+          `;
+          const blob = new Blob([proxyScript], { type: 'text/plain' });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = 'proxyloop.ps1';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        });
+      }
+
       initSocket();
       updateOnlineUsers();
     } else {
@@ -113,4 +147,5 @@ document.getElementById('createUserBtn').addEventListener('click', async ()=>{
     }
   } catch(e){ statusDiv.textContent = 'Error creating user'; console.error(e); }
 });
+
 

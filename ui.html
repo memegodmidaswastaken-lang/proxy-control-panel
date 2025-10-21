@@ -4,36 +4,69 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Proxy Control Panel</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #1f1f1f;
+  color: #eee;
+  margin: 0;
+  padding: 0;
+}
+.container { max-width: 900px; margin: auto; padding: 20px; }
+h1 { text-align: center; color: #fff; }
+button { background: #444; color: #fff; border: none; padding: 5px 10px; cursor: pointer; }
+button:hover { background: #666; }
+input, select { padding: 5px; margin: 2px; }
+#loginDiv, #panelDiv { background: #2a2a2a; padding: 20px; border-radius: 8px; margin-top: 20px; }
+#panelDiv { display: none; }
+.user-section { margin-bottom: 20px; border: 1px solid #444; padding: 10px; border-radius: 6px; }
+.user-section h2 { margin-top: 0; }
+.online-list li { margin-bottom: 6px; }
+.status { margin-top: 10px; font-weight: bold; }
+.owner-actions, .mod-actions { margin-top: 10px; }
+.owner-actions button, .mod-actions button { margin-right: 6px; }
+#newUserDiv { display: none; }
+</style>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-<link rel="stylesheet" href="style.css">
+<script src="main.js"></script>
 </head>
 <body>
+<div class="container">
 <h1>Proxy Control Panel</h1>
 
+<!-- LOGIN -->
 <div id="loginDiv">
+  <h2>Login</h2>
   <input type="text" id="username" placeholder="Username">
   <input type="password" id="password" placeholder="Password">
   <button id="loginBtn">Login</button>
 </div>
 
-<div id="panelDiv" style="display:none;">
-  <h2>Welcome, <span id="userRole"></span></h2>
+<!-- PANEL -->
+<div id="panelDiv">
+  <div class="user-section">
+    <strong>Logged in as: </strong><span id="userRole"></span>
+    <div class="status" id="status">Kill switch: OFF</div>
+  </div>
 
-  <div id="commands">
-    <button id="killSwitchBtn">Toggle Kill Switch</button>
+  <!-- ONLINE USERS -->
+  <div class="user-section">
+    <h2>Online Users</h2>
+    <ul id="onlineList" class="online-list"></ul>
+  </div>
+
+  <!-- OWNER ACTIONS -->
+  <div class="user-section owner-actions">
+    <h2>Owner Actions</h2>
+    <button id="killSwitchBtn" style="display:none;">Activate Kill Switch</button>
     <button id="downloadBtn" style="display:none;">Download Proxy Script</button>
   </div>
 
-  <div id="status"></div>
-
-  <h3>Online Users:</h3>
-  <ul id="onlineList"></ul>
-
-  <!-- Owner-only new user form -->
-  <div id="newUserDiv" style="display:none;">
-    <h3>Create New User (Owner only)</h3>
-    <input type="text" id="newUsername" placeholder="New Username">
-    <input type="password" id="newPassword" placeholder="New Password">
+  <!-- CREATE USER -->
+  <div class="user-section" id="newUserDiv">
+    <h2>Create New User</h2>
+    <input type="text" id="newUsername" placeholder="Username">
+    <input type="password" id="newPassword" placeholder="Password">
     <select id="newRole">
       <option value="member">Member</option>
       <option value="moderator">Moderator</option>
@@ -42,9 +75,8 @@
     <button id="createUserBtn">Create User</button>
     <div id="newUserStatus"></div>
   </div>
-</div>
 
-<script src="main.js"></script>
+</div>
+</div>
 </body>
 </html>
-

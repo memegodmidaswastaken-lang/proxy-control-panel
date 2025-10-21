@@ -1,13 +1,13 @@
 let myRole = '';
-let token = '';
+let sessionId = '';
 
 document.getElementById('loginBtn').addEventListener('click', async () => {
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     const resp = await fetch('/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username,password})});
     const data = await resp.json();
-    if(!data.token){ alert(data.error||'Login failed'); return; }
-    token = data.token;
+    if(!data.sessionId){ alert(data.error||'Login failed'); return; }
+    sessionId = data.sessionId;
     myRole = data.role;
     document.getElementById('loginDiv').style.display='none';
     document.getElementById('panelDiv').style.display='block';
@@ -18,7 +18,7 @@ document.getElementById('loginBtn').addEventListener('click', async () => {
 
 async function loadOnlineUsers(){
     try{
-        const resp = await fetch('/api/online',{headers:{Authorization:`Bearer ${token}`}});
+        const resp = await fetch('/api/online',{headers:{'X-Session-Id':sessionId}});
         const data = await resp.json();
         const list = document.getElementById('onlineList');
         list.innerHTML='';
